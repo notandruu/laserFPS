@@ -7,7 +7,7 @@ import {
   Noise,
   Vignette,
 } from '@react-three/postprocessing'
-import { useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { laserAudio } from '@/lib/laser/audio'
 import {
@@ -16,7 +16,7 @@ import {
   PLAYER_POS,
   enemyField,
 } from '@/lib/laser/enemies'
-import { laserState, useGameStore } from '@/lib/laser/store'
+import { laserState, useGameStore, type WeaponId } from '@/lib/laser/store'
 import { Enemies } from './enemies'
 import { HandLaser } from './hand-laser'
 import { Sparks } from './sparks'
@@ -37,6 +37,10 @@ const _moveRight = new THREE.Vector3()
 const LOOK_SENSITIVITY = 0.0024
 const WALK_SPEED = 6.4
 const SPRINT_SPEED = 9.2
+const PULSE_DAMAGE = 125
+const PULSE_COOLDOWN = 0.82
+const DASH_COOLDOWN = 1.15
+const DASH_DISTANCE = 6.4
 
 /**
  * Per-frame controller: mouse-look aiming, continuous-beam damage on drones,
@@ -45,15 +49,33 @@ const SPRINT_SPEED = 9.2
 function Controller() {
   const { camera, gl } = useThree()
   const mode = useGameStore((s) => s.mode)
+  const weapon = useGameStore((s) => s.weapon)
   const setFiring = useGameStore((s) => s.setFiring)
+  const setWeapon = useGameStore((s) => s.setWeapon)
+  const setPulseCooldown = useGameStore((s) => s.setPulseCooldown)
+  const setDashCooldown = useGameStore((s) => s.setDashCooldown)
   const modeRef = useRef(mode)
+  const weaponRef = useRef<WeaponId>(weapon)
 
   useEffect(() => {
     modeRef.current = mode
   }, [mode])
 
+  useEffect(() => {
+    weaponRef.current = weapon
+    if (weapon !== 'beam' && laserState.firing) {
+      laserState.firing = false
+      setFiring(false)
+      laserAudio.stop()
+    }
+  }, [weapon, setFiring])
+
   const waveTimer = useRef(0)
   const spawnedForMode = useRef(false)
+  const pulseCooldown = useRef(0)
+  const dashCooldown = useRef(0)
+  const lastPulseDisplay = useRef(0)
+  const lastDashDisplay = useRef(0)
 
   // Accumulated mouse-look orientation (radians). Yaw is unbounded for full 360°.
   const yaw = useRef(0)
@@ -68,6 +90,102 @@ function Controller() {
     right: false,
     sprint: false,
   })
+
+  const publishPulseCooldown = useCallback(
+    (value: number) => {
+      const display = Math.max(0, Number(value.toFixed(2)))
+      if (Math.abs(display - lastPulseDisplay.current) < 0.03 && display !== 0) {
+        return
+      }
+      lastPulseDisplay.current = display
+      setPulseCooldown(display)
+    },
+    [setPulseCooldown]
+  )
+
+  const publishDashCooldown = useCallback(
+    (value: number) => {
+      const display = Math.max(0, Number(value.toFixed(2)))
+      if (Math.abs(display - lastDashDisplay.current) < 0.03 && display !== 0) {
+        return
+      }
+      lastDashDisplay.current = display
+      setDashCooldown(display)
+    },
+    [setDashCooldown]
+  )
+
+  const awardKill = useCallback((scoreValue: number) => {
+    const s = useGameStore.getState()
+    s.addKill()
+    s.addScore(scoreValue)
+    laserAudio.blip(90)
+  }, [])
+
+  const clampPlayerToArena = useCallback(() => {
+    PLAYER_POS.y = PLAYER_HEIGHT
+    const flatDist = Math.hypot(PLAYER_POS.x, PLAYER_POS.z)
+    if (flatDist > ARENA_RADIUS) {
+      const scale = ARENA_RADIUS / flatDist
+      PLAYER_POS.x *= scale
+      PLAYER_POS.z *= scale
+    }
+  }, [])
+
+  const performDash = useCallback(() => {
+    if (modeRef.current !== 'playing') return
+    if (dashCooldown.current > 0) return
+
+    _move.set(0, 0, 0)
+    _moveForward.set(-Math.sin(yaw.current), 0, -Math.cos(yaw.current))
+    _moveRight.set(Math.cos(yaw.current), 0, -Math.sin(yaw.current))
+
+    if (keys.current.forward) _move.add(_moveForward)
+    if (keys.current.back) _move.sub(_moveForward)
+    if (keys.current.right) _move.add(_moveRight)
+    if (keys.current.left) _move.sub(_moveRight)
+    if (_move.lengthSq() === 0) _move.copy(_moveForward)
+
+    _move.normalize().multiplyScalar(DASH_DISTANCE)
+    PLAYER_POS.add(_move)
+    clampPlayerToArena()
+    dashCooldown.current = DASH_COOLDOWN
+    publishDashCooldown(DASH_COOLDOWN)
+    laserAudio.blip(35)
+  }, [clampPlayerToArena, publishDashCooldown])
+
+  const firePulse = useCallback(() => {
+    if (modeRef.current !== 'playing') return
+    if (pulseCooldown.current > 0) return
+
+    camera.getWorldDirection(_forward)
+    _origin.copy(camera.position)
+    _fallback.copy(_origin).addScaledVector(_forward, 42)
+
+    const res = enemyField.damageAt(_origin, _forward, PULSE_DAMAGE)
+    if (res) {
+      laserState.hitPoint = {
+        x: res.point.x,
+        y: res.point.y,
+        z: res.point.z,
+      }
+      laserState.hasHit = true
+      if (res.killed) awardKill(res.scoreValue)
+      else laserAudio.blip(70)
+    } else {
+      laserState.hitPoint = {
+        x: _fallback.x,
+        y: _fallback.y,
+        z: _fallback.z,
+      }
+      laserState.hasHit = false
+      laserAudio.blip(35)
+    }
+
+    laserState.pulseFlash = 0.12
+    pulseCooldown.current = PULSE_COOLDOWN
+    publishPulseCooldown(PULSE_COOLDOWN)
+  }, [awardKill, camera, publishPulseCooldown])
 
   useEffect(() => {
     const setKey = (code: string, down: boolean) => {
@@ -85,6 +203,21 @@ function Controller() {
 
     const onDown = (e: KeyboardEvent) => {
       if (modeRef.current !== 'playing') return
+      if (e.code === 'Digit1') {
+        setWeapon('beam')
+        e.preventDefault()
+        return
+      }
+      if (e.code === 'Digit2') {
+        setWeapon('pulse')
+        e.preventDefault()
+        return
+      }
+      if (e.code === 'Space') {
+        performDash()
+        e.preventDefault()
+        return
+      }
       if (setKey(e.code, true)) e.preventDefault()
     }
     const onUp = (e: KeyboardEvent) => {
@@ -106,7 +239,7 @@ function Controller() {
       window.removeEventListener('keyup', onUp)
       window.removeEventListener('blur', clear)
     }
-  }, [])
+  }, [performDash, setWeapon])
 
   // Pointer down/up toggles the laser (only while playing)
   useEffect(() => {
@@ -123,6 +256,10 @@ function Controller() {
       if (e.button !== 0) return
       if (modeRef.current !== 'playing') return
       requestLock()
+      if (weaponRef.current === 'pulse') {
+        firePulse()
+        return
+      }
       laserState.firing = true
       setFiring(true)
       laserAudio.start()
@@ -142,7 +279,7 @@ function Controller() {
       window.removeEventListener('blur', up)
       up()
     }
-  }, [gl, setFiring])
+  }, [firePulse, gl, setFiring])
 
   // Pointer Lock: capture the cursor when the browser allows it.
   useEffect(() => {
@@ -199,6 +336,18 @@ function Controller() {
     const dt = Math.min(delta, 0.05)
     const playing = modeRef.current === 'playing'
 
+    if (laserState.pulseFlash > 0) {
+      laserState.pulseFlash = Math.max(0, laserState.pulseFlash - dt)
+    }
+    if (pulseCooldown.current > 0) {
+      pulseCooldown.current = Math.max(0, pulseCooldown.current - dt)
+      publishPulseCooldown(pulseCooldown.current)
+    }
+    if (dashCooldown.current > 0) {
+      dashCooldown.current = Math.max(0, dashCooldown.current - dt)
+      publishDashCooldown(dashCooldown.current)
+    }
+
     _move.set(0, 0, 0)
     if (playing) {
       _moveForward.set(-Math.sin(yaw.current), 0, -Math.cos(yaw.current))
@@ -214,13 +363,7 @@ function Controller() {
           (keys.current.sprint ? SPRINT_SPEED : WALK_SPEED) * dt
         )
         PLAYER_POS.add(_move)
-        PLAYER_POS.y = PLAYER_HEIGHT
-        const flatDist = Math.hypot(PLAYER_POS.x, PLAYER_POS.z)
-        if (flatDist > ARENA_RADIUS) {
-          const scale = ARENA_RADIUS / flatDist
-          PLAYER_POS.x *= scale
-          PLAYER_POS.z *= scale
-        }
+        clampPlayerToArena()
       }
     }
     camera.position.copy(PLAYER_POS)
@@ -269,10 +412,7 @@ function Controller() {
         }
         laserState.hasHit = true
         if (res.killed) {
-          const s = useGameStore.getState()
-          s.addKill()
-          s.addScore(100 + (s.wave - 1) * 25)
-          laserAudio.blip(90)
+          awardKill(res.scoreValue)
         }
       } else {
         laserState.hitPoint = {
@@ -333,18 +473,25 @@ function Controller() {
       keys.current.sprint = false
       spawnedForMode.current = false
       waveTimer.current = 0
+      pulseCooldown.current = 0
+      dashCooldown.current = 0
+      lastPulseDisplay.current = 0
+      lastDashDisplay.current = 0
+      publishPulseCooldown(0)
+      publishDashCooldown(0)
       pointerLocked.current = false
       // Recenter the view for the new run.
       yaw.current = 0
       pitch.current = 0
       laserState.aimYaw = 0
       laserState.aimPitch = 0
+      laserState.pulseFlash = 0
       window.dispatchEvent(new Event('laser-look-reset'))
     } else if (typeof document !== 'undefined' && document.pointerLockElement) {
       // Release the cursor so menu / game-over buttons are clickable.
       document.exitPointerLock()
     }
-  }, [mode])
+  }, [mode, publishDashCooldown, publishPulseCooldown])
 
   return null
 }

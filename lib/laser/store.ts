@@ -3,6 +3,7 @@
 import { create } from 'zustand'
 
 export type GameMode = 'menu' | 'playing' | 'gameover'
+export type WeaponId = 'beam' | 'pulse'
 
 export const MAX_HEALTH = 100
 
@@ -13,6 +14,9 @@ interface GameState {
   score: number
   wave: number
   kills: number
+  weapon: WeaponId
+  pulseCooldown: number
+  dashCooldown: number
   highScore: number
   /** Increments whenever the player takes contact damage, drives the HUD damage flash */
   damageTick: number
@@ -23,6 +27,9 @@ interface GameState {
   addScore: (amount: number) => void
   setWave: (wave: number) => void
   addKill: () => void
+  setWeapon: (weapon: WeaponId) => void
+  setPulseCooldown: (cooldown: number) => void
+  setDashCooldown: (cooldown: number) => void
   loadHighScore: () => void
   startGame: () => void
   endGame: () => void
@@ -41,6 +48,9 @@ export const useGameStore = create<GameState>((set, get) => ({
   score: 0,
   wave: 1,
   kills: 0,
+  weapon: 'beam',
+  pulseCooldown: 0,
+  dashCooldown: 0,
   highScore: 0,
   damageTick: 0,
   setMode: (mode) => set({ mode }),
@@ -54,6 +64,9 @@ export const useGameStore = create<GameState>((set, get) => ({
   addScore: (amount) => set((s) => ({ score: s.score + amount })),
   setWave: (wave) => set({ wave }),
   addKill: () => set((s) => ({ kills: s.kills + 1 })),
+  setWeapon: (weapon) => set({ weapon }),
+  setPulseCooldown: (pulseCooldown) => set({ pulseCooldown }),
+  setDashCooldown: (dashCooldown) => set({ dashCooldown }),
   loadHighScore: () => set({ highScore: readHighScore() }),
   startGame: () =>
     set({
@@ -62,6 +75,9 @@ export const useGameStore = create<GameState>((set, get) => ({
       score: 0,
       wave: 1,
       kills: 0,
+      weapon: 'beam',
+      pulseCooldown: 0,
+      dashCooldown: 0,
       firing: false,
     }),
   endGame: () => {
@@ -89,4 +105,6 @@ export const laserState = {
   /** Mouse-look camera orientation (radians) */
   aimYaw: 0,
   aimPitch: 0,
+  /** Short-lived visual flash for single-shot weapons */
+  pulseFlash: 0,
 }

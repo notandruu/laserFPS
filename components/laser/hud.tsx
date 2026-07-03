@@ -36,6 +36,9 @@ export function Hud() {
   const score = useGameStore((s) => s.score)
   const wave = useGameStore((s) => s.wave)
   const kills = useGameStore((s) => s.kills)
+  const weapon = useGameStore((s) => s.weapon)
+  const pulseCooldown = useGameStore((s) => s.pulseCooldown)
+  const dashCooldown = useGameStore((s) => s.dashCooldown)
   const highScore = useGameStore((s) => s.highScore)
   const damageTick = useGameStore((s) => s.damageTick)
 
@@ -88,6 +91,8 @@ export function Hud() {
   }, [setMode])
 
   const healthPct = Math.round((health / MAX_HEALTH) * 100)
+  const pulseReady = pulseCooldown <= 0
+  const dashReady = dashCooldown <= 0
 
   return (
     <div className="pointer-events-none absolute inset-0 z-10 select-none font-mono text-white">
@@ -139,10 +144,16 @@ export function Hud() {
               <Key>WASD</Key> MOVE
             </span>
             <span className="flex items-center gap-2">
+              <Key>SHIFT</Key> SPRINT
+            </span>
+            <span className="flex items-center gap-2">
+              <Key>SPACE</Key> DASH
+            </span>
+            <span className="flex items-center gap-2">
               <Key>MOVE MOUSE</Key> AIM
             </span>
             <span className="flex items-center gap-2">
-              <Key>HOLD CLICK</Key> FIRE
+              <Key>1/2</Key> WEAPONS
             </span>
             <span className="flex items-center gap-2">
               <Key>ESC</Key> MENU
@@ -189,12 +200,41 @@ export function Hud() {
               />
             </div>
           </div>
+          <div className="absolute bottom-16 left-1/2 flex -translate-x-1/2 items-center gap-2 text-[10px] tracking-[0.24em]">
+            <span
+              className={`border px-3 py-1.5 ${
+                weapon === 'beam'
+                  ? 'border-white bg-white text-black'
+                  : 'border-white/25 bg-black/40 text-white/45'
+              }`}
+            >
+              1 BEAM
+            </span>
+            <span
+              className={`border px-3 py-1.5 ${
+                weapon === 'pulse'
+                  ? 'border-white bg-white text-black'
+                  : 'border-white/25 bg-black/40 text-white/45'
+              }`}
+            >
+              2 PULSE {pulseReady ? 'READY' : pulseCooldown.toFixed(1)}
+            </span>
+            <span className="border border-white/25 bg-black/40 px-3 py-1.5 text-white/55">
+              DASH {dashReady ? 'READY' : dashCooldown.toFixed(1)}
+            </span>
+          </div>
           <div className="flex items-center gap-4 text-[11px] tracking-widest text-white/35">
             <span className="flex items-center gap-2">
               <Key>WASD</Key> MOVE
             </span>
             <span className="flex items-center gap-2">
-              <Key>HOLD CLICK</Key> FIRE
+              <Key>1/2</Key> WEAPON
+            </span>
+            <span className="flex items-center gap-2">
+              <Key>SPACE</Key> DASH
+            </span>
+            <span className="flex items-center gap-2">
+              <Key>CLICK</Key> FIRE
             </span>
             <span className="flex items-center gap-2">
               <Key>ESC</Key> MENU

@@ -104,6 +104,11 @@ export function Enemies() {
       refs.group.position.copy(e.pos)
       refs.group.lookAt(PLAYER_POS)
       refs.group.rotation.x = Math.sin(e.phase + performance.now() / 1400) * 0.2
+      refs.bodyMat.color.set(e.kind === 'tank' ? '#12100b' : '#0a0a0a')
+      refs.bodyMat.emissive.set(e.kind === 'charger' ? '#8fdfff' : '#ffffff')
+      refs.eyeL.color.set(e.kind === 'tank' ? '#fff1a8' : e.kind === 'charger' ? '#9be8ff' : '#ffffff')
+      refs.eyeR.color.copy(refs.eyeL.color)
+      refs.ring.scale.setScalar(e.kind === 'tank' ? 1.12 : e.kind === 'charger' ? 0.86 : 1)
 
       // Death pop: scale up + fade out as `dying` counts down
       let scale = 1
@@ -124,10 +129,14 @@ export function Enemies() {
         refs.ringMat.opacity = 1
         // Pulse the health-based glow + damage flash
         const hpFrac = Math.max(0, e.hp / e.maxHp)
-        refs.ringMat.color.setScalar(0.5 + (1 - hpFrac) * 0.8)
-        refs.bodyMat.emissiveIntensity = e.hitFlash * 3.5
+        const heat = 0.5 + (1 - hpFrac) * 0.8
+        if (e.kind === 'charger') refs.ringMat.color.setRGB(0.38 * heat, 0.86 * heat, heat)
+        else if (e.kind === 'tank') refs.ringMat.color.setRGB(heat, 0.82 * heat, 0.38 * heat)
+        else refs.ringMat.color.setScalar(heat)
+        refs.bodyMat.emissiveIntensity =
+          e.hitFlash * (e.kind === 'tank' ? 4.4 : e.kind === 'charger' ? 4 : 3.5)
       }
-      refs.group.scale.setScalar(scale)
+      refs.group.scale.setScalar(scale * e.radius)
     }
   })
 

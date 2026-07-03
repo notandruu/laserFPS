@@ -4,10 +4,14 @@ import * as THREE from 'three'
 
 export interface Enemy {
   id: number
+  kind: EnemyKind
   pos: THREE.Vector3
   hp: number
   maxHp: number
   speed: number
+  radius: number
+  contactDamage: number
+  scoreValue: number
   alive: boolean
   /** 0..1, decays over time; drives the emissive damage flash */
   hitFlash: number
@@ -16,6 +20,8 @@ export interface Enemy {
   /** per-enemy bob/rotation phase */
   phase: number
 }
+
+export type EnemyKind = 'drone' | 'charger' | 'tank'
 
 export const PLAYER_HEIGHT = 1.6
 export const ARENA_RADIUS = 28
@@ -34,6 +40,46 @@ const _toPlayer = new THREE.Vector3()
 const _rel = new THREE.Vector3()
 const _proj = new THREE.Vector3()
 
+function pickKind(wave: number, index: number): EnemyKind {
+  if (wave >= 4 && index % 6 === 4) return 'tank'
+  if (wave >= 2 && index % 3 === 1) return 'charger'
+  if (wave >= 5 && Math.random() < 0.18) return 'tank'
+  return 'drone'
+}
+
+function statsFor(kind: EnemyKind, wave: number) {
+  const waveHp = 26 + (wave - 1) * 14
+  const waveSpeed = 0.85 + (wave - 1) * 0.14
+
+  if (kind === 'charger') {
+    return {
+      hp: Math.round(waveHp * 0.72),
+      speed: waveSpeed * 1.55 + Math.random() * 0.38,
+      radius: 0.78,
+      contactDamage: 11,
+      scoreValue: 130 + (wave - 1) * 26,
+    }
+  }
+
+  if (kind === 'tank') {
+    return {
+      hp: Math.round(waveHp * 2.45),
+      speed: waveSpeed * 0.62 + Math.random() * 0.16,
+      radius: 1.42,
+      contactDamage: 24,
+      scoreValue: 280 + (wave - 1) * 38,
+    }
+  }
+
+  return {
+    hp: waveHp,
+    speed: waveSpeed + Math.random() * 0.3,
+    radius: 1,
+    contactDamage: 14,
+    scoreValue: 100 + (wave - 1) * 25,
+  }
+}
+
 class EnemyField {
   enemies: Enemy[] = []
   private nextId = 1
@@ -49,9 +95,9 @@ class EnemyField {
   /** Spawn a full wave. Count / hp / speed scale with the wave number. */
   spawnWave(wave: number, playerPos: THREE.Vector3 = PLAYER_POS) {
     const count = 3 + wave
-    const hp = 26 + (wave - 1) * 14
-    const speed = 0.85 + (wave - 1) * 0.14
     for (let i = 0; i < count; i++) {
+      const kind = pickKind(wave, i)
+      const stats = statsFor(kind, wave)
       const angle = Math.random() * Math.PI * 2
       const dist = 16 + Math.random() * 10
       const x = THREE.MathUtils.clamp(
@@ -64,13 +110,17 @@ class EnemyField {
         -ARENA_RADIUS,
         ARENA_RADIUS
       )
-      const y = 1.2 + Math.random() * 2.2
+      const y = 1.0 + stats.radius * 0.8 + Math.random() * 1.8
       this.enemies.push({
         id: this.nextId++,
+        kind,
         pos: new THREE.Vector3(x, y, z),
-        hp,
-        maxHp: hp,
-        speed: speed + Math.random() * 0.3,
+        hp: stats.hp,
+        maxHp: stats.hp,
+        speed: stats.speed,
+        radius: stats.radius,
+        contactDamage: stats.contactDamage,
+        scoreValue: stats.scoreValue,
         alive: true,
         hitFlash: 0,
         dying: 0,
@@ -94,7 +144,7 @@ class EnemyField {
     origin: THREE.Vector3,
     dir: THREE.Vector3,
     dmg: number
-  ): { point: THREE.Vector3; killed: boolean } | null {
+  ): { point: THREE.Vector3; killed: boolean; scoreValue: number } | null {
     let best: Enemy | null = null
     let bestT = Number.POSITIVE_INFINITY
 
@@ -105,7 +155,7 @@ class EnemyField {
       if (t <= 0) continue // behind the camera
       _proj.copy(dir).multiplyScalar(t).add(origin)
       const perp = _proj.distanceTo(e.pos)
-      if (perp <= HIT_RADIUS && t < bestT) {
+      if (perp <= HIT_RADIUS * e.radius && t < bestT) {
         bestT = t
         best = e
       }
@@ -127,7 +177,7 @@ class EnemyField {
       .copy(dir)
       .multiplyScalar(bestT)
       .add(origin)
-    return { point, killed }
+    return { point, killed, scoreValue: best.scoreValue }
   }
 
   /**
@@ -149,9 +199,9 @@ class EnemyField {
       // Advance toward the live player position on all axes
       _toPlayer.subVectors(playerPos, e.pos)
       const dist = _toPlayer.length()
-      if (dist <= CONTACT_DIST) {
+      if (dist <= CONTACT_DIST * e.radius) {
         // Reached the player: deal a burst of damage and self-destruct
-        contactDamage += 14
+        contactDamage += e.contactDamage
         e.alive = false
         e.dying = DEATH_TIME
         continue

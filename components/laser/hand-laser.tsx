@@ -60,8 +60,8 @@ function LaserDevice({ tipRef }: { tipRef: React.RefObject<THREE.Mesh | null> })
 
   useFrame((state) => {
     if (!ringRef.current) return
-    const firing = laserState.firing && laserState.hasHit
-    const pulse = firing
+    const active = (laserState.firing && laserState.hasHit) || laserState.pulseFlash > 0
+    const pulse = active
       ? 2.4 + Math.sin(state.clock.elapsedTime * 30) * 0.6
       : 0.5 + Math.sin(state.clock.elapsedTime * 2) * 0.2
     ringRef.current.emissiveIntensity = pulse
@@ -168,9 +168,10 @@ export function HandLaser() {
     rig.position.copy(camera.position)
     rig.quaternion.copy(camera.quaternion)
 
-    // Beam shows whenever firing; impact effects only when it lands on a drone
-    const firing = laserState.firing
-    const impact = laserState.firing && laserState.hasHit
+    // Beam shows while held, or briefly during a pulse shot.
+    const pulse = laserState.pulseFlash > 0
+    const firing = laserState.firing || pulse
+    const impact = firing && laserState.hasHit
     recoil.current = THREE.MathUtils.lerp(recoil.current, firing ? 1 : 0, dt * 14)
 
     // Hand sway based on smoothed pointer + firing vibration
@@ -213,18 +214,21 @@ export function HandLaser() {
         m.scale.set(1, len, 1)
         m.quaternion.setFromUnitVectors(_up, _dir)
       }
-      const flicker = 0.85 + Math.sin(t * 47) * 0.1 + Math.random() * 0.05
+      const flicker =
+        (pulse ? 1.35 : 0.85) + Math.sin(t * 47) * 0.1 + Math.random() * 0.05
       ;(core.material as THREE.MeshBasicMaterial).opacity = flicker
-      ;(glow.material as THREE.MeshBasicMaterial).opacity = 0.16 * flicker
+      ;(glow.material as THREE.MeshBasicMaterial).opacity =
+        (pulse ? 0.28 : 0.16) * flicker
 
       flare.visible = impact
       flare.position.set(_hitWorld.x, _hitWorld.y, _hitWorld.z + 0.04)
-      const fs = 0.55 + Math.sin(t * 53) * 0.08 + Math.random() * 0.06
+      const fs =
+        (pulse ? 0.8 : 0.55) + Math.sin(t * 53) * 0.08 + Math.random() * 0.06
       flare.scale.set(fs, fs, 1)
 
       light.visible = impact
       light.position.set(_hitWorld.x, _hitWorld.y, _hitWorld.z + 0.6)
-      light.intensity = 14 * flicker
+      light.intensity = (pulse ? 22 : 14) * flicker
     } else {
       core.visible = false
       glow.visible = false
