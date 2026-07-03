@@ -45,8 +45,16 @@ export function Hud() {
   // Track pointer-lock so we can prompt the player to click and look around
   useEffect(() => {
     const onChange = () => setLocked(!!document.pointerLockElement)
+    const onReady = () => setLocked(true)
+    const onReset = () => setLocked(false)
     document.addEventListener('pointerlockchange', onChange)
-    return () => document.removeEventListener('pointerlockchange', onChange)
+    window.addEventListener('laser-look-ready', onReady)
+    window.addEventListener('laser-look-reset', onReset)
+    return () => {
+      document.removeEventListener('pointerlockchange', onChange)
+      window.removeEventListener('laser-look-ready', onReady)
+      window.removeEventListener('laser-look-reset', onReset)
+    }
   }, [])
 
   // Trigger the red damage vignette whenever the player is hit

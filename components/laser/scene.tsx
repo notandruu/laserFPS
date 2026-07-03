@@ -26,6 +26,10 @@ const _forward = new THREE.Vector3()
 const _origin = new THREE.Vector3()
 const _fallback = new THREE.Vector3()
 
+const LOOK_SENSITIVITY = 0.0024
+const EDGE_TURN_SPEED = 3.6
+const EDGE_DEADZONE = 0.08
+
 /**
  * Per-frame controller: mouse-look aiming, continuous-beam damage on drones,
  * enemy advancement + contact damage, and endless wave escalation.
@@ -48,13 +52,24 @@ function Controller() {
   const pitch = useRef(0)
   // Recent mouse movement, decays toward 0 to drive subtle hand sway.
   const sway = useRef({ x: 0, y: 0 })
+  const pointerLocked = useRef(false)
+  const fallbackLook = useRef({ active: false, x: 0, y: 0 })
+  const lookReadySent = useRef(false)
 
   // Pointer down/up toggles the laser (only while playing)
   useEffect(() => {
     const el = gl.domElement
+
+    const requestLock = () => {
+      if (document.pointerLockElement === el) return
+      const lock = el.requestPointerLock()
+      if (lock instanceof Promise) lock.catch(() => undefined)
+    }
+
     const down = (e: PointerEvent) => {
       if (e.button !== 0) return
       if (modeRef.current !== 'playing') return
+      requestLock()
       laserState.firing = true
       setFiring(true)
       laserAudio.start()
@@ -76,24 +91,56 @@ function Controller() {
     }
   }, [gl, setFiring])
 
-  // Pointer Lock: capture the cursor so mouse movement is unbounded (full 360°).
+  // Pointer Lock: capture the cursor when the browser allows it.
   useEffect(() => {
     const el = gl.domElement
-    const SENS = 0.0024
 
     const requestLock = () => {
       if (modeRef.current !== 'playing') return
-      if (document.pointerLockElement !== el) el.requestPointerLock()
+      if (document.pointerLockElement === el) return
+      const lock = el.requestPointerLock()
+      if (lock instanceof Promise) lock.catch(() => undefined)
+    }
+
+    const syncLockState = () => {
+      pointerLocked.current = document.pointerLockElement === el
+      if (pointerLocked.current && !lookReadySent.current) {
+        lookReadySent.current = true
+        window.dispatchEvent(new Event('laser-look-ready'))
+      }
     }
 
     const onMove = (e: MouseEvent) => {
-      if (document.pointerLockElement !== el) return
       if (modeRef.current !== 'playing') return
-      // Yaw accumulates without clamping -> full 360° turning.
-      yaw.current -= e.movementX * SENS
+      if (pointerLocked.current) {
+        fallbackLook.current.active = false
+      } else {
+        const rect = el.getBoundingClientRect()
+        const inside =
+          e.clientX >= rect.left &&
+          e.clientX <= rect.right &&
+          e.clientY >= rect.top &&
+          e.clientY <= rect.bottom
+
+        fallbackLook.current.active = inside
+        if (inside) {
+          fallbackLook.current.x =
+            ((e.clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1
+          fallbackLook.current.y =
+            ((e.clientY - rect.top) / Math.max(1, rect.height)) * 2 - 1
+
+          if (!lookReadySent.current) {
+            lookReadySent.current = true
+            window.dispatchEvent(new Event('laser-look-ready'))
+          }
+        }
+      }
+
+      // Yaw accumulates without clamping, so full 360 turning is allowed.
+      yaw.current -= e.movementX * LOOK_SENSITIVITY
       // Pitch is clamped so the view can't flip over.
       pitch.current = THREE.MathUtils.clamp(
-        pitch.current + e.movementY * SENS,
+        pitch.current + e.movementY * LOOK_SENSITIVITY,
         -0.9,
         0.7
       )
@@ -103,9 +150,11 @@ function Controller() {
 
     // Click anywhere on the canvas to (re)acquire the lock.
     el.addEventListener('click', requestLock)
+    document.addEventListener('pointerlockchange', syncLockState)
     document.addEventListener('mousemove', onMove)
     return () => {
       el.removeEventListener('click', requestLock)
+      document.removeEventListener('pointerlockchange', syncLockState)
       document.removeEventListener('mousemove', onMove)
     }
   }, [gl])
@@ -113,6 +162,28 @@ function Controller() {
   useFrame((_state, delta) => {
     const dt = Math.min(delta, 0.05)
     const playing = modeRef.current === 'playing'
+
+    if (playing && !pointerLocked.current && fallbackLook.current.active) {
+      const edgeX = fallbackLook.current.x
+      const edgeAmount = Math.max(0, Math.abs(edgeX) - EDGE_DEADZONE)
+      if (edgeAmount > 0) {
+        const turn =
+          Math.sign(edgeX) *
+          Math.pow(edgeAmount / (1 - EDGE_DEADZONE), 1.35)
+        yaw.current -= turn * EDGE_TURN_SPEED * dt
+      }
+
+      const targetPitch = THREE.MathUtils.clamp(
+        fallbackLook.current.y * 0.72,
+        -0.9,
+        0.7
+      )
+      pitch.current = THREE.MathUtils.lerp(
+        pitch.current,
+        targetPitch,
+        Math.min(1, dt * 5)
+      )
+    }
 
     // ----- Mouse-look: accumulated deltas -> unbounded yaw, clamped pitch -----
     laserState.aimYaw = THREE.MathUtils.lerp(
@@ -216,11 +287,14 @@ function Controller() {
       enemyField.reset()
       spawnedForMode.current = false
       waveTimer.current = 0
+      fallbackLook.current.active = false
+      lookReadySent.current = false
       // Recenter the view for the new run.
       yaw.current = 0
       pitch.current = 0
       laserState.aimYaw = 0
       laserState.aimPitch = 0
+      window.dispatchEvent(new Event('laser-look-reset'))
     } else if (typeof document !== 'undefined' && document.pointerLockElement) {
       // Release the cursor so menu / game-over buttons are clickable.
       document.exitPointerLock()
