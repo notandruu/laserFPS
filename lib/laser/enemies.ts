@@ -17,8 +17,11 @@ export interface Enemy {
   phase: number
 }
 
-/** Where the player stands (camera). Enemies advance toward this on the XZ plane. */
-const PLAYER = new THREE.Vector3(0, 1.6, 6.5)
+export const PLAYER_HEIGHT = 1.6
+export const ARENA_RADIUS = 28
+
+/** Live player position. The controller owns it, enemies read it. */
+export const PLAYER_POS = new THREE.Vector3(0, PLAYER_HEIGHT, 0)
 
 /** Radius around the beam ray within which an enemy is considered hit (aim forgiveness) */
 const HIT_RADIUS = 1.7
@@ -44,15 +47,23 @@ class EnemyField {
   }
 
   /** Spawn a full wave. Count / hp / speed scale with the wave number. */
-  spawnWave(wave: number) {
+  spawnWave(wave: number, playerPos: THREE.Vector3 = PLAYER_POS) {
     const count = 3 + wave
     const hp = 26 + (wave - 1) * 14
     const speed = 0.85 + (wave - 1) * 0.14
     for (let i = 0; i < count; i++) {
-      const angle = (Math.random() - 0.5) * Math.PI * 0.9
+      const angle = Math.random() * Math.PI * 2
       const dist = 16 + Math.random() * 10
-      const x = Math.sin(angle) * dist * 0.6
-      const z = PLAYER.z - Math.cos(angle) * dist
+      const x = THREE.MathUtils.clamp(
+        playerPos.x + Math.cos(angle) * dist,
+        -ARENA_RADIUS,
+        ARENA_RADIUS
+      )
+      const z = THREE.MathUtils.clamp(
+        playerPos.z + Math.sin(angle) * dist,
+        -ARENA_RADIUS,
+        ARENA_RADIUS
+      )
       const y = 1.2 + Math.random() * 2.2
       this.enemies.push({
         id: this.nextId++,
@@ -123,7 +134,7 @@ class EnemyField {
    * Advance all enemies toward the player and animate death pops.
    * Returns the total contact damage dealt to the player this frame.
    */
-  update(delta: number): number {
+  update(delta: number, playerPos: THREE.Vector3 = PLAYER_POS): number {
     let contactDamage = 0
 
     for (const e of this.enemies) {
@@ -135,8 +146,8 @@ class EnemyField {
         continue
       }
 
-      // Advance toward the player on all axes
-      _toPlayer.subVectors(PLAYER, e.pos)
+      // Advance toward the live player position on all axes
+      _toPlayer.subVectors(playerPos, e.pos)
       const dist = _toPlayer.length()
       if (dist <= CONTACT_DIST) {
         // Reached the player: deal a burst of damage and self-destruct
@@ -159,5 +170,4 @@ class EnemyField {
 }
 
 export const enemyField = new EnemyField()
-export const PLAYER_POS = PLAYER
 export const DEATH_DURATION = DEATH_TIME

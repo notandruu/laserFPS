@@ -31,6 +31,7 @@ export function Hud() {
   const mode = useGameStore((s) => s.mode)
   const startGame = useGameStore((s) => s.startGame)
   const setMode = useGameStore((s) => s.setMode)
+  const loadHighScore = useGameStore((s) => s.loadHighScore)
   const health = useGameStore((s) => s.health)
   const score = useGameStore((s) => s.score)
   const wave = useGameStore((s) => s.wave)
@@ -41,6 +42,10 @@ export function Hud() {
   const inGame = mode === 'playing'
   const [flash, setFlash] = useState(false)
   const [locked, setLocked] = useState(false)
+
+  useEffect(() => {
+    loadHighScore()
+  }, [loadHighScore])
 
   // Track pointer-lock so we can prompt the player to click and look around
   useEffect(() => {
@@ -130,6 +135,9 @@ export function Hud() {
 
           <div className="flex items-center gap-4 text-[11px] tracking-widest text-white/40">
             <span className="flex items-center gap-2">
+              <Key>WASD</Key> MOVE
+            </span>
+            <span className="flex items-center gap-2">
               <Key>MOVE MOUSE</Key> AIM
             </span>
             <span className="flex items-center gap-2">
@@ -181,6 +189,9 @@ export function Hud() {
             </div>
           </div>
           <div className="flex items-center gap-4 text-[11px] tracking-widest text-white/35">
+            <span className="flex items-center gap-2">
+              <Key>WASD</Key> MOVE
+            </span>
             <span className="flex items-center gap-2">
               <Key>HOLD CLICK</Key> FIRE
             </span>

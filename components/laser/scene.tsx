@@ -10,7 +10,12 @@ import {
 import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { laserAudio } from '@/lib/laser/audio'
-import { enemyField } from '@/lib/laser/enemies'
+import {
+  ARENA_RADIUS,
+  PLAYER_HEIGHT,
+  PLAYER_POS,
+  enemyField,
+} from '@/lib/laser/enemies'
 import { laserState, useGameStore } from '@/lib/laser/store'
 import { Enemies } from './enemies'
 import { HandLaser } from './hand-laser'
@@ -25,10 +30,15 @@ const WAVE_DELAY = 1.4
 const _forward = new THREE.Vector3()
 const _origin = new THREE.Vector3()
 const _fallback = new THREE.Vector3()
+const _move = new THREE.Vector3()
+const _moveForward = new THREE.Vector3()
+const _moveRight = new THREE.Vector3()
 
 const LOOK_SENSITIVITY = 0.0024
 const EDGE_TURN_SPEED = 3.6
 const EDGE_DEADZONE = 0.08
+const WALK_SPEED = 6.4
+const SPRINT_SPEED = 9.2
 
 /**
  * Per-frame controller: mouse-look aiming, continuous-beam damage on drones,
@@ -55,6 +65,52 @@ function Controller() {
   const pointerLocked = useRef(false)
   const fallbackLook = useRef({ active: false, x: 0, y: 0 })
   const lookReadySent = useRef(false)
+  const keys = useRef({
+    forward: false,
+    back: false,
+    left: false,
+    right: false,
+    sprint: false,
+  })
+
+  useEffect(() => {
+    const setKey = (code: string, down: boolean) => {
+      if (code === 'KeyW') keys.current.forward = down
+      else if (code === 'KeyS') keys.current.back = down
+      else if (code === 'KeyA') keys.current.left = down
+      else if (code === 'KeyD') keys.current.right = down
+      else if (code === 'ShiftLeft' || code === 'ShiftRight') {
+        keys.current.sprint = down
+      } else {
+        return false
+      }
+      return true
+    }
+
+    const onDown = (e: KeyboardEvent) => {
+      if (modeRef.current !== 'playing') return
+      if (setKey(e.code, true)) e.preventDefault()
+    }
+    const onUp = (e: KeyboardEvent) => {
+      if (setKey(e.code, false)) e.preventDefault()
+    }
+    const clear = () => {
+      keys.current.forward = false
+      keys.current.back = false
+      keys.current.left = false
+      keys.current.right = false
+      keys.current.sprint = false
+    }
+
+    window.addEventListener('keydown', onDown)
+    window.addEventListener('keyup', onUp)
+    window.addEventListener('blur', clear)
+    return () => {
+      window.removeEventListener('keydown', onDown)
+      window.removeEventListener('keyup', onUp)
+      window.removeEventListener('blur', clear)
+    }
+  }, [])
 
   // Pointer down/up toggles the laser (only while playing)
   useEffect(() => {
@@ -185,6 +241,32 @@ function Controller() {
       )
     }
 
+    _move.set(0, 0, 0)
+    if (playing) {
+      _moveForward.set(-Math.sin(yaw.current), 0, -Math.cos(yaw.current))
+      _moveRight.set(Math.cos(yaw.current), 0, -Math.sin(yaw.current))
+
+      if (keys.current.forward) _move.add(_moveForward)
+      if (keys.current.back) _move.sub(_moveForward)
+      if (keys.current.right) _move.add(_moveRight)
+      if (keys.current.left) _move.sub(_moveRight)
+
+      if (_move.lengthSq() > 0) {
+        _move.normalize().multiplyScalar(
+          (keys.current.sprint ? SPRINT_SPEED : WALK_SPEED) * dt
+        )
+        PLAYER_POS.add(_move)
+        PLAYER_POS.y = PLAYER_HEIGHT
+        const flatDist = Math.hypot(PLAYER_POS.x, PLAYER_POS.z)
+        if (flatDist > ARENA_RADIUS) {
+          const scale = ARENA_RADIUS / flatDist
+          PLAYER_POS.x *= scale
+          PLAYER_POS.z *= scale
+        }
+      }
+    }
+    camera.position.copy(PLAYER_POS)
+
     // ----- Mouse-look: accumulated deltas -> unbounded yaw, clamped pitch -----
     laserState.aimYaw = THREE.MathUtils.lerp(
       laserState.aimYaw,
@@ -250,7 +332,7 @@ function Controller() {
     if (!playing) return
 
     // ----- Advance enemies + contact damage -----
-    const contact = enemyField.update(dt)
+    const contact = enemyField.update(dt, PLAYER_POS)
 
     if (contact > 0) {
       const s = useGameStore.getState()
@@ -272,7 +354,7 @@ function Controller() {
         const s = useGameStore.getState()
         const nextWave = spawnedForMode.current ? s.wave + 1 : 1
         if (spawnedForMode.current) s.setWave(nextWave)
-        enemyField.spawnWave(nextWave)
+        enemyField.spawnWave(nextWave, PLAYER_POS)
         spawnedForMode.current = true
         waveTimer.current = WAVE_DELAY
       }
@@ -285,6 +367,12 @@ function Controller() {
   useEffect(() => {
     if (mode === 'playing') {
       enemyField.reset()
+      PLAYER_POS.set(0, PLAYER_HEIGHT, 0)
+      keys.current.forward = false
+      keys.current.back = false
+      keys.current.left = false
+      keys.current.right = false
+      keys.current.sprint = false
       spawnedForMode.current = false
       waveTimer.current = 0
       fallbackLook.current.active = false
@@ -304,13 +392,90 @@ function Controller() {
   return null
 }
 
-/** Dark concrete floor catching the laser glow */
-function Floor() {
+function Arena() {
+  const markers = useMemo(
+    () =>
+      Array.from({ length: 12 }, (_, i) => {
+        const angle = (i / 12) * Math.PI * 2
+        const radius = ARENA_RADIUS - 4
+        return {
+          id: i,
+          angle,
+          x: Math.cos(angle) * radius,
+          z: Math.sin(angle) * radius,
+          tall: i % 3 === 0,
+        }
+      }),
+    []
+  )
+
   return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, FLOOR_Y, -6]}>
-      <planeGeometry args={[120, 80]} />
-      <meshStandardMaterial color="#070707" roughness={0.85} metalness={0.1} />
-    </mesh>
+    <group>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, FLOOR_Y, 0]}>
+        <planeGeometry args={[ARENA_RADIUS * 2.6, ARENA_RADIUS * 2.6]} />
+        <meshStandardMaterial color="#070707" roughness={0.85} metalness={0.1} />
+      </mesh>
+
+      <gridHelper
+        args={[ARENA_RADIUS * 2, 28, '#5a5a5a', '#171717']}
+        position={[0, FLOOR_Y + 0.012, 0]}
+      />
+
+      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, FLOOR_Y + 0.04, 0]}>
+        <torusGeometry args={[ARENA_RADIUS, 0.035, 8, 160]} />
+        <meshBasicMaterial color="#ffffff" transparent opacity={0.26} />
+      </mesh>
+
+      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 1.25, 0]}>
+        <torusGeometry args={[ARENA_RADIUS - 1.4, 0.025, 8, 160]} />
+        <meshBasicMaterial color="#ffffff" transparent opacity={0.16} />
+      </mesh>
+
+      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 3.6, 0]}>
+        <torusGeometry args={[ARENA_RADIUS - 2.8, 0.025, 8, 160]} />
+        <meshBasicMaterial color="#ffffff" transparent opacity={0.12} />
+      </mesh>
+
+      {markers.map((marker) => (
+        <group
+          key={marker.id}
+          position={[marker.x, FLOOR_Y + 1.25, marker.z]}
+          rotation={[0, -marker.angle, 0]}
+        >
+          <mesh>
+            <boxGeometry args={[0.22, marker.tall ? 5.4 : 3.1, 0.22]} />
+            <meshStandardMaterial
+              color="#151515"
+              emissive="#ffffff"
+              emissiveIntensity={marker.tall ? 0.7 : 0.34}
+              roughness={0.5}
+              metalness={0.4}
+            />
+          </mesh>
+          <mesh position={[0, 0.35, -0.02]}>
+            <boxGeometry args={[1.4, 0.09, 0.05]} />
+            <meshBasicMaterial color="#ffffff" transparent opacity={0.38} />
+          </mesh>
+          <mesh position={[0, 1.25, -0.02]}>
+            <boxGeometry args={[0.9, 0.06, 0.05]} />
+            <meshBasicMaterial color="#ffffff" transparent opacity={0.26} />
+          </mesh>
+          <mesh position={[0, marker.tall ? 2.85 : 1.7, 0]}>
+            <sphereGeometry args={[marker.tall ? 0.32 : 0.22, 14, 14]} />
+            <meshBasicMaterial color="#ffffff" toneMapped={false} />
+          </mesh>
+          {marker.tall && (
+            <pointLight
+              position={[0, 2.9, 0]}
+              intensity={1.1}
+              distance={8}
+              decay={2}
+              color="#ffffff"
+            />
+          )}
+        </group>
+      ))}
+    </group>
   )
 }
 
@@ -320,20 +485,20 @@ export function LaserScene() {
   return (
     <Canvas
       dpr={dpr}
-      camera={{ position: [0, 1.6, 6.5], fov: 65, near: 0.05, far: 120 }}
+      camera={{ position: [0, PLAYER_HEIGHT, 0], fov: 65, near: 0.05, far: 120 }}
       gl={{ antialias: true }}
       className="touch-none"
     >
       <color attach="background" args={['#000000']} />
-      <fog attach="fog" args={['#000000', 14, 40]} />
+      <fog attach="fog" args={['#000000', 18, 52]} />
 
       <ambientLight intensity={0.28} />
       <directionalLight position={[2, 6, 5]} intensity={1.1} color="#dfe6ee" />
-      <pointLight position={[0, 5, 4]} intensity={3} distance={16} decay={2} color="#cfd6de" />
+      <pointLight position={[0, 5, 0]} intensity={3} distance={18} decay={2} color="#cfd6de" />
 
       <Controller />
       <Enemies />
-      <Floor />
+      <Arena />
       <HandLaser />
       <Sparks />
 

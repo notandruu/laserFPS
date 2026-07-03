@@ -3,7 +3,7 @@
 import { useFrame } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
-import { DEATH_DURATION, enemyField } from '@/lib/laser/enemies'
+import { DEATH_DURATION, PLAYER_POS, enemyField } from '@/lib/laser/enemies'
 
 const POOL_SIZE = 48
 
@@ -84,16 +84,6 @@ function Drone({ register }: { register: (r: DroneRefs | null) => void }) {
   )
 }
 
-/** Distant murk backdrop so drones fade in from the dark */
-function Backdrop() {
-  return (
-    <mesh position={[0, 4, -30]}>
-      <planeGeometry args={[120, 60]} />
-      <meshBasicMaterial color="#050505" />
-    </mesh>
-  )
-}
-
 export function Enemies() {
   const pool = useRef<(DroneRefs | null)[]>([])
 
@@ -112,7 +102,7 @@ export function Enemies() {
 
       refs.group.visible = true
       refs.group.position.copy(e.pos)
-      refs.group.rotation.y += 0.01
+      refs.group.lookAt(PLAYER_POS)
       refs.group.rotation.x = Math.sin(e.phase + performance.now() / 1400) * 0.2
 
       // Death pop: scale up + fade out as `dying` counts down
@@ -143,7 +133,6 @@ export function Enemies() {
 
   return (
     <group>
-      <Backdrop />
       {slots.map((i) => (
         <Drone
           key={i}

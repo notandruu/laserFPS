@@ -23,11 +23,12 @@ interface GameState {
   addScore: (amount: number) => void
   setWave: (wave: number) => void
   addKill: () => void
+  loadHighScore: () => void
   startGame: () => void
   endGame: () => void
 }
 
-function loadHighScore() {
+function readHighScore() {
   if (typeof window === 'undefined') return 0
   const raw = window.localStorage.getItem('laser-strike-highscore')
   return raw ? Number.parseInt(raw, 10) || 0 : 0
@@ -40,7 +41,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   score: 0,
   wave: 1,
   kills: 0,
-  highScore: loadHighScore(),
+  highScore: 0,
   damageTick: 0,
   setMode: (mode) => set({ mode }),
   setFiring: (firing) => set({ firing }),
@@ -53,6 +54,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   addScore: (amount) => set((s) => ({ score: s.score + amount })),
   setWave: (wave) => set({ wave }),
   addKill: () => set((s) => ({ kills: s.kills + 1 })),
+  loadHighScore: () => set({ highScore: readHighScore() }),
   startGame: () =>
     set({
       mode: 'playing',

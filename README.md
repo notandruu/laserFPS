@@ -22,6 +22,8 @@ pnpm build
 ## Controls
 
 - Click the game to lock the pointer and start aiming.
+- Use `WASD` to move around the arena.
+- Hold `Shift` to sprint.
 - Move the mouse to look around.
 - Hold the left mouse button to fire the laser.
 - Survive as long as you can.
