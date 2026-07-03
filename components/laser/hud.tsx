@@ -73,6 +73,7 @@ export function Hud() {
 
   const start = useCallback(() => {
     startGame()
+    window.dispatchEvent(new Event('laser-request-pointer-lock'))
   }, [startGame])
 
   // ESC returns to menu

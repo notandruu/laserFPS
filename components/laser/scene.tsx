@@ -35,8 +35,6 @@ const _moveForward = new THREE.Vector3()
 const _moveRight = new THREE.Vector3()
 
 const LOOK_SENSITIVITY = 0.0024
-const EDGE_TURN_SPEED = 3.6
-const EDGE_DEADZONE = 0.08
 const WALK_SPEED = 6.4
 const SPRINT_SPEED = 9.2
 
@@ -63,8 +61,6 @@ function Controller() {
   // Recent mouse movement, decays toward 0 to drive subtle hand sway.
   const sway = useRef({ x: 0, y: 0 })
   const pointerLocked = useRef(false)
-  const fallbackLook = useRef({ active: false, x: 0, y: 0 })
-  const lookReadySent = useRef(false)
   const keys = useRef({
     forward: false,
     back: false,
@@ -118,6 +114,7 @@ function Controller() {
 
     const requestLock = () => {
       if (document.pointerLockElement === el) return
+      if (useGameStore.getState().mode !== 'playing') return
       const lock = el.requestPointerLock()
       if (lock instanceof Promise) lock.catch(() => undefined)
     }
@@ -152,7 +149,7 @@ function Controller() {
     const el = gl.domElement
 
     const requestLock = () => {
-      if (modeRef.current !== 'playing') return
+      if (useGameStore.getState().mode !== 'playing') return
       if (document.pointerLockElement === el) return
       const lock = el.requestPointerLock()
       if (lock instanceof Promise) lock.catch(() => undefined)
@@ -160,37 +157,18 @@ function Controller() {
 
     const syncLockState = () => {
       pointerLocked.current = document.pointerLockElement === el
-      if (pointerLocked.current && !lookReadySent.current) {
-        lookReadySent.current = true
+      if (pointerLocked.current) {
         window.dispatchEvent(new Event('laser-look-ready'))
+      } else if (laserState.firing) {
+        laserState.firing = false
+        setFiring(false)
+        laserAudio.stop()
       }
     }
 
     const onMove = (e: MouseEvent) => {
       if (modeRef.current !== 'playing') return
-      if (pointerLocked.current) {
-        fallbackLook.current.active = false
-      } else {
-        const rect = el.getBoundingClientRect()
-        const inside =
-          e.clientX >= rect.left &&
-          e.clientX <= rect.right &&
-          e.clientY >= rect.top &&
-          e.clientY <= rect.bottom
-
-        fallbackLook.current.active = inside
-        if (inside) {
-          fallbackLook.current.x =
-            ((e.clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1
-          fallbackLook.current.y =
-            ((e.clientY - rect.top) / Math.max(1, rect.height)) * 2 - 1
-
-          if (!lookReadySent.current) {
-            lookReadySent.current = true
-            window.dispatchEvent(new Event('laser-look-ready'))
-          }
-        }
-      }
+      if (!pointerLocked.current) return
 
       // Yaw accumulates without clamping, so full 360 turning is allowed.
       yaw.current -= e.movementX * LOOK_SENSITIVITY
@@ -206,40 +184,20 @@ function Controller() {
 
     // Click anywhere on the canvas to (re)acquire the lock.
     el.addEventListener('click', requestLock)
+    window.addEventListener('laser-request-pointer-lock', requestLock)
     document.addEventListener('pointerlockchange', syncLockState)
     document.addEventListener('mousemove', onMove)
     return () => {
       el.removeEventListener('click', requestLock)
+      window.removeEventListener('laser-request-pointer-lock', requestLock)
       document.removeEventListener('pointerlockchange', syncLockState)
       document.removeEventListener('mousemove', onMove)
     }
-  }, [gl])
+  }, [gl, setFiring])
 
   useFrame((_state, delta) => {
     const dt = Math.min(delta, 0.05)
     const playing = modeRef.current === 'playing'
-
-    if (playing && !pointerLocked.current && fallbackLook.current.active) {
-      const edgeX = fallbackLook.current.x
-      const edgeAmount = Math.max(0, Math.abs(edgeX) - EDGE_DEADZONE)
-      if (edgeAmount > 0) {
-        const turn =
-          Math.sign(edgeX) *
-          Math.pow(edgeAmount / (1 - EDGE_DEADZONE), 1.35)
-        yaw.current -= turn * EDGE_TURN_SPEED * dt
-      }
-
-      const targetPitch = THREE.MathUtils.clamp(
-        -fallbackLook.current.y * 0.72,
-        -0.9,
-        0.7
-      )
-      pitch.current = THREE.MathUtils.lerp(
-        pitch.current,
-        targetPitch,
-        Math.min(1, dt * 5)
-      )
-    }
 
     _move.set(0, 0, 0)
     if (playing) {
@@ -375,8 +333,7 @@ function Controller() {
       keys.current.sprint = false
       spawnedForMode.current = false
       waveTimer.current = 0
-      fallbackLook.current.active = false
-      lookReadySent.current = false
+      pointerLocked.current = false
       // Recenter the view for the new run.
       yaw.current = 0
       pitch.current = 0
