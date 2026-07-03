@@ -140,7 +140,7 @@ function Controller() {
       yaw.current -= e.movementX * LOOK_SENSITIVITY
       // Pitch is clamped so the view can't flip over.
       pitch.current = THREE.MathUtils.clamp(
-        pitch.current + e.movementY * LOOK_SENSITIVITY,
+        pitch.current - e.movementY * LOOK_SENSITIVITY,
         -0.9,
         0.7
       )
@@ -174,7 +174,7 @@ function Controller() {
       }
 
       const targetPitch = THREE.MathUtils.clamp(
-        fallbackLook.current.y * 0.72,
+        -fallbackLook.current.y * 0.72,
         -0.9,
         0.7
       )
