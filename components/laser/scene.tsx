@@ -10,20 +10,24 @@ import {
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { laserAudio } from '@/lib/laser/audio'
-import {
-  ARENA_RADIUS,
-  PLAYER_HEIGHT,
-  PLAYER_POS,
-  enemyField,
-} from '@/lib/laser/enemies'
+import { enemyField } from '@/lib/laser/enemies'
+import { ARENA_RADIUS, PLAYER_HEIGHT, PLAYER_POS } from '@/lib/laser/world'
+import { usePlayerMovement } from '@/lib/laser/movement'
 import { laserState, useGameStore, type WeaponId } from '@/lib/laser/store'
+import {
+  BEAM_DPS,
+  DASH_COOLDOWN,
+  DASH_DISTANCE,
+  PULSE_COOLDOWN,
+  PULSE_DAMAGE,
+  SPRINT_SPEED,
+  WALK_SPEED,
+} from '@/lib/laser/weapon-constants'
 import { Enemies } from './enemies'
 import { HandLaser } from './hand-laser'
 import { Sparks } from './sparks'
 
 const FLOOR_Y = -2
-/** Damage per second the beam deals while held on a drone */
-const BEAM_DPS = 55
 /** Delay between clearing a wave and the next spawning */
 const WAVE_DELAY = 1.4
 
@@ -31,16 +35,6 @@ const _forward = new THREE.Vector3()
 const _origin = new THREE.Vector3()
 const _fallback = new THREE.Vector3()
 const _move = new THREE.Vector3()
-const _moveForward = new THREE.Vector3()
-const _moveRight = new THREE.Vector3()
-
-const LOOK_SENSITIVITY = 0.0024
-const WALK_SPEED = 6.4
-const SPRINT_SPEED = 9.2
-const PULSE_DAMAGE = 125
-const PULSE_COOLDOWN = 0.82
-const DASH_COOLDOWN = 1.15
-const DASH_DISTANCE = 6.4
 
 /**
  * Per-frame controller: mouse-look aiming, continuous-beam damage on drones,
@@ -77,19 +71,15 @@ function Controller() {
   const lastPulseDisplay = useRef(0)
   const lastDashDisplay = useRef(0)
 
-  // Accumulated mouse-look orientation (radians). Yaw is unbounded for full 360°.
-  const yaw = useRef(0)
-  const pitch = useRef(0)
-  // Recent mouse movement, decays toward 0 to drive subtle hand sway.
-  const sway = useRef({ x: 0, y: 0 })
-  const pointerLocked = useRef(false)
-  const keys = useRef({
-    forward: false,
-    back: false,
-    left: false,
-    right: false,
-    sprint: false,
-  })
+  const stopFiring = useCallback(() => {
+    if (!laserState.firing) return
+    laserState.firing = false
+    setFiring(false)
+    laserAudio.stop()
+  }, [setFiring])
+
+  const isPlaying = useCallback(() => modeRef.current === 'playing', [])
+  const movement = usePlayerMovement(gl.domElement, isPlaying, stopFiring)
 
   const publishPulseCooldown = useCallback(
     (value: number) => {
@@ -136,15 +126,10 @@ function Controller() {
     if (modeRef.current !== 'playing') return
     if (dashCooldown.current > 0) return
 
-    _move.set(0, 0, 0)
-    _moveForward.set(-Math.sin(yaw.current), 0, -Math.cos(yaw.current))
-    _moveRight.set(Math.cos(yaw.current), 0, -Math.sin(yaw.current))
-
-    if (keys.current.forward) _move.add(_moveForward)
-    if (keys.current.back) _move.sub(_moveForward)
-    if (keys.current.right) _move.add(_moveRight)
-    if (keys.current.left) _move.sub(_moveRight)
-    if (_move.lengthSq() === 0) _move.copy(_moveForward)
+    movement.computeMoveVector(_move)
+    if (_move.lengthSq() === 0) {
+      _move.set(-Math.sin(movement.yaw.current), 0, -Math.cos(movement.yaw.current))
+    }
 
     _move.normalize().multiplyScalar(DASH_DISTANCE)
     PLAYER_POS.add(_move)
@@ -152,7 +137,7 @@ function Controller() {
     dashCooldown.current = DASH_COOLDOWN
     publishDashCooldown(DASH_COOLDOWN)
     laserAudio.blip(35)
-  }, [clampPlayerToArena, publishDashCooldown])
+  }, [clampPlayerToArena, movement, publishDashCooldown])
 
   const firePulse = useCallback(() => {
     if (modeRef.current !== 'playing') return
@@ -187,75 +172,33 @@ function Controller() {
     publishPulseCooldown(PULSE_COOLDOWN)
   }, [awardKill, camera, publishPulseCooldown])
 
+  // Mode-specific keys: weapon swap + dash. WASD/sprint are handled by usePlayerMovement.
   useEffect(() => {
-    const setKey = (code: string, down: boolean) => {
-      if (code === 'KeyW') keys.current.forward = down
-      else if (code === 'KeyS') keys.current.back = down
-      else if (code === 'KeyA') keys.current.left = down
-      else if (code === 'KeyD') keys.current.right = down
-      else if (code === 'ShiftLeft' || code === 'ShiftRight') {
-        keys.current.sprint = down
-      } else {
-        return false
-      }
-      return true
-    }
-
     const onDown = (e: KeyboardEvent) => {
       if (modeRef.current !== 'playing') return
       if (e.code === 'Digit1') {
         setWeapon('beam')
         e.preventDefault()
-        return
-      }
-      if (e.code === 'Digit2') {
+      } else if (e.code === 'Digit2') {
         setWeapon('pulse')
         e.preventDefault()
-        return
-      }
-      if (e.code === 'Space') {
+      } else if (e.code === 'Space') {
         performDash()
         e.preventDefault()
-        return
       }
-      if (setKey(e.code, true)) e.preventDefault()
     }
-    const onUp = (e: KeyboardEvent) => {
-      if (setKey(e.code, false)) e.preventDefault()
-    }
-    const clear = () => {
-      keys.current.forward = false
-      keys.current.back = false
-      keys.current.left = false
-      keys.current.right = false
-      keys.current.sprint = false
-    }
-
     window.addEventListener('keydown', onDown)
-    window.addEventListener('keyup', onUp)
-    window.addEventListener('blur', clear)
-    return () => {
-      window.removeEventListener('keydown', onDown)
-      window.removeEventListener('keyup', onUp)
-      window.removeEventListener('blur', clear)
-    }
+    return () => window.removeEventListener('keydown', onDown)
   }, [performDash, setWeapon])
 
   // Pointer down/up toggles the laser (only while playing)
   useEffect(() => {
     const el = gl.domElement
 
-    const requestLock = () => {
-      if (document.pointerLockElement === el) return
-      if (useGameStore.getState().mode !== 'playing') return
-      const lock = el.requestPointerLock()
-      if (lock instanceof Promise) lock.catch(() => undefined)
-    }
-
     const down = (e: PointerEvent) => {
       if (e.button !== 0) return
       if (modeRef.current !== 'playing') return
-      requestLock()
+      movement.requestLock()
       if (weaponRef.current === 'pulse') {
         firePulse()
         return
@@ -279,58 +222,7 @@ function Controller() {
       window.removeEventListener('blur', up)
       up()
     }
-  }, [firePulse, gl, setFiring])
-
-  // Pointer Lock: capture the cursor when the browser allows it.
-  useEffect(() => {
-    const el = gl.domElement
-
-    const requestLock = () => {
-      if (useGameStore.getState().mode !== 'playing') return
-      if (document.pointerLockElement === el) return
-      const lock = el.requestPointerLock()
-      if (lock instanceof Promise) lock.catch(() => undefined)
-    }
-
-    const syncLockState = () => {
-      pointerLocked.current = document.pointerLockElement === el
-      if (pointerLocked.current) {
-        window.dispatchEvent(new Event('laser-look-ready'))
-      } else if (laserState.firing) {
-        laserState.firing = false
-        setFiring(false)
-        laserAudio.stop()
-      }
-    }
-
-    const onMove = (e: MouseEvent) => {
-      if (modeRef.current !== 'playing') return
-      if (!pointerLocked.current) return
-
-      // Yaw accumulates without clamping, so full 360 turning is allowed.
-      yaw.current -= e.movementX * LOOK_SENSITIVITY
-      // Pitch is clamped so the view can't flip over.
-      pitch.current = THREE.MathUtils.clamp(
-        pitch.current - e.movementY * LOOK_SENSITIVITY,
-        -0.9,
-        0.7
-      )
-      sway.current.x = THREE.MathUtils.clamp(e.movementX * 0.02, -1, 1)
-      sway.current.y = THREE.MathUtils.clamp(e.movementY * 0.02, -1, 1)
-    }
-
-    // Click anywhere on the canvas to (re)acquire the lock.
-    el.addEventListener('click', requestLock)
-    window.addEventListener('laser-request-pointer-lock', requestLock)
-    document.addEventListener('pointerlockchange', syncLockState)
-    document.addEventListener('mousemove', onMove)
-    return () => {
-      el.removeEventListener('click', requestLock)
-      window.removeEventListener('laser-request-pointer-lock', requestLock)
-      document.removeEventListener('pointerlockchange', syncLockState)
-      document.removeEventListener('mousemove', onMove)
-    }
-  }, [gl, setFiring])
+  }, [firePulse, gl, movement, setFiring])
 
   useFrame((_state, delta) => {
     const dt = Math.min(delta, 0.05)
@@ -350,17 +242,10 @@ function Controller() {
 
     _move.set(0, 0, 0)
     if (playing) {
-      _moveForward.set(-Math.sin(yaw.current), 0, -Math.cos(yaw.current))
-      _moveRight.set(Math.cos(yaw.current), 0, -Math.sin(yaw.current))
-
-      if (keys.current.forward) _move.add(_moveForward)
-      if (keys.current.back) _move.sub(_moveForward)
-      if (keys.current.right) _move.add(_moveRight)
-      if (keys.current.left) _move.sub(_moveRight)
-
+      movement.computeMoveVector(_move)
       if (_move.lengthSq() > 0) {
         _move.normalize().multiplyScalar(
-          (keys.current.sprint ? SPRINT_SPEED : WALK_SPEED) * dt
+          (movement.keys.current.sprint ? SPRINT_SPEED : WALK_SPEED) * dt
         )
         PLAYER_POS.add(_move)
         clampPlayerToArena()
@@ -369,33 +254,7 @@ function Controller() {
     camera.position.copy(PLAYER_POS)
 
     // ----- Mouse-look: accumulated deltas -> unbounded yaw, clamped pitch -----
-    laserState.aimYaw = THREE.MathUtils.lerp(
-      laserState.aimYaw,
-      yaw.current,
-      Math.min(1, dt * 18)
-    )
-    laserState.aimPitch = THREE.MathUtils.lerp(
-      laserState.aimPitch,
-      pitch.current,
-      Math.min(1, dt * 18)
-    )
-    camera.rotation.order = 'YXZ'
-    camera.rotation.y = laserState.aimYaw
-    camera.rotation.x = laserState.aimPitch
-
-    // Decay recent movement, feed it into the hand sway
-    sway.current.x = THREE.MathUtils.lerp(sway.current.x, 0, Math.min(1, dt * 6))
-    sway.current.y = THREE.MathUtils.lerp(sway.current.y, 0, Math.min(1, dt * 6))
-    laserState.pointer.x = THREE.MathUtils.lerp(
-      laserState.pointer.x,
-      sway.current.x,
-      Math.min(1, dt * 8)
-    )
-    laserState.pointer.y = THREE.MathUtils.lerp(
-      laserState.pointer.y,
-      sway.current.y,
-      Math.min(1, dt * 8)
-    )
+    movement.applyLook(camera, dt)
 
     // ----- Beam ray from the camera center -----
     camera.getWorldDirection(_forward)
@@ -466,11 +325,7 @@ function Controller() {
     if (mode === 'playing') {
       enemyField.reset()
       PLAYER_POS.set(0, PLAYER_HEIGHT, 0)
-      keys.current.forward = false
-      keys.current.back = false
-      keys.current.left = false
-      keys.current.right = false
-      keys.current.sprint = false
+      movement.clearKeys()
       spawnedForMode.current = false
       waveTimer.current = 0
       pulseCooldown.current = 0
@@ -479,24 +334,19 @@ function Controller() {
       lastDashDisplay.current = 0
       publishPulseCooldown(0)
       publishDashCooldown(0)
-      pointerLocked.current = false
-      // Recenter the view for the new run.
-      yaw.current = 0
-      pitch.current = 0
-      laserState.aimYaw = 0
-      laserState.aimPitch = 0
       laserState.pulseFlash = 0
-      window.dispatchEvent(new Event('laser-look-reset'))
+      // Recenter the view for the new run.
+      movement.reset()
     } else if (typeof document !== 'undefined' && document.pointerLockElement) {
       // Release the cursor so menu / game-over buttons are clickable.
       document.exitPointerLock()
     }
-  }, [mode, publishDashCooldown, publishPulseCooldown])
+  }, [mode, movement, publishDashCooldown, publishPulseCooldown])
 
   return null
 }
 
-function Arena() {
+export function Arena() {
   const markers = useMemo(
     () =>
       Array.from({ length: 12 }, (_, i) => {
@@ -585,6 +435,7 @@ function Arena() {
 
 export function LaserScene() {
   const dpr = useMemo<[number, number]>(() => [1, 2], [])
+  const weapon = useGameStore((s) => s.weapon)
 
   return (
     <Canvas
@@ -603,7 +454,7 @@ export function LaserScene() {
       <Controller />
       <Enemies />
       <Arena />
-      <HandLaser />
+      <HandLaser kind={weapon === 'beam' ? 'beam' : 'burst'} />
       <Sparks />
 
       <EffectComposer>

@@ -1,6 +1,9 @@
 'use client'
 
 import * as THREE from 'three'
+import { ARENA_RADIUS, PLAYER_HEIGHT, PLAYER_POS } from './world'
+
+export { ARENA_RADIUS, PLAYER_HEIGHT, PLAYER_POS }
 
 export interface Enemy {
   id: number
@@ -22,12 +25,6 @@ export interface Enemy {
 }
 
 export type EnemyKind = 'drone' | 'charger' | 'tank'
-
-export const PLAYER_HEIGHT = 1.6
-export const ARENA_RADIUS = 28
-
-/** Live player position. The controller owns it, enemies read it. */
-export const PLAYER_POS = new THREE.Vector3(0, PLAYER_HEIGHT, 0)
 
 /** Radius around the beam ray within which an enemy is considered hit (aim forgiveness) */
 const HIT_RADIUS = 1.7
