@@ -11,11 +11,13 @@ import { BeamWeaponModel, BurstWeaponModel } from '@/components/laser/weapon-mod
 const POOL_SIZE = 8
 const NAME_REFRESH_INTERVAL = 0.5
 const BEAM_RANGE = 26
+const BLINK_RING_LIFE = 0.2
 
 const _dir = new THREE.Vector3()
 const _tipWorld = new THREE.Vector3()
 const _mid = new THREE.Vector3()
 const _end = new THREE.Vector3()
+const _up = new THREE.Vector3(0, 1, 0)
 
 /** yaw/pitch (YXZ order, matches the camera) -> forward direction */
 function aimDirection(out: THREE.Vector3, yaw: number, pitch: number) {
@@ -31,8 +33,14 @@ interface SlotRefs {
   beamGlowMat: THREE.MeshStandardMaterial
   burstGunGroup: THREE.Group
   burstGlowMat: THREE.MeshStandardMaterial
+  // World-space effects: siblings of the transformed character group, not children of it,
+  // since their position/orientation is computed in world space each frame.
   beam: THREE.Mesh
   beamMat: THREE.MeshBasicMaterial
+  ringFrom: THREE.Mesh
+  ringFromMat: THREE.MeshBasicMaterial
+  ringTo: THREE.Mesh
+  ringToMat: THREE.MeshBasicMaterial
 }
 
 /** A blocky humanoid rig: head/torso/hips/legs/off-arm are static, the gun arm tilts with aim pitch. */
@@ -43,6 +51,7 @@ function RemoteSlot({
   name: string
   register: (r: SlotRefs | null) => void
 }) {
+  const group = useRef<THREE.Group>(null)
   const bodyMat = useRef<THREE.MeshStandardMaterial>(null)
   const gunPivot = useRef<THREE.Group>(null)
   const beamGunGroup = useRef<THREE.Group>(null)
@@ -51,86 +60,115 @@ function RemoteSlot({
   const burstGlowMat = useRef<THREE.MeshStandardMaterial>(null)
   const beam = useRef<THREE.Mesh>(null)
   const beamMat = useRef<THREE.MeshBasicMaterial>(null)
+  const ringFrom = useRef<THREE.Mesh>(null)
+  const ringFromMat = useRef<THREE.MeshBasicMaterial>(null)
+  const ringTo = useRef<THREE.Mesh>(null)
+  const ringToMat = useRef<THREE.MeshBasicMaterial>(null)
+
+  const tryRegister = () => {
+    if (
+      group.current &&
+      bodyMat.current &&
+      gunPivot.current &&
+      beamGunGroup.current &&
+      beamGlowMat.current &&
+      burstGunGroup.current &&
+      burstGlowMat.current &&
+      beam.current &&
+      beamMat.current &&
+      ringFrom.current &&
+      ringFromMat.current &&
+      ringTo.current &&
+      ringToMat.current
+    ) {
+      register({
+        group: group.current,
+        bodyMat: bodyMat.current,
+        gunPivot: gunPivot.current,
+        beamGunGroup: beamGunGroup.current,
+        beamGlowMat: beamGlowMat.current,
+        burstGunGroup: burstGunGroup.current,
+        burstGlowMat: burstGlowMat.current,
+        beam: beam.current,
+        beamMat: beamMat.current,
+        ringFrom: ringFrom.current,
+        ringFromMat: ringFromMat.current,
+        ringTo: ringTo.current,
+        ringToMat: ringToMat.current,
+      })
+    } else {
+      register(null)
+    }
+  }
 
   return (
-    <group
-      ref={(g) => {
-        if (
-          g &&
-          bodyMat.current &&
-          gunPivot.current &&
-          beamGunGroup.current &&
-          beamGlowMat.current &&
-          burstGunGroup.current &&
-          burstGlowMat.current &&
-          beam.current &&
-          beamMat.current
-        ) {
-          register({
-            group: g,
-            bodyMat: bodyMat.current,
-            gunPivot: gunPivot.current,
-            beamGunGroup: beamGunGroup.current,
-            beamGlowMat: beamGlowMat.current,
-            burstGunGroup: burstGunGroup.current,
-            burstGlowMat: burstGlowMat.current,
-            beam: beam.current,
-            beamMat: beamMat.current,
-          })
-        } else {
-          register(null)
-        }
-      }}
-      visible={false}
-    >
-      {/* Head */}
-      <mesh position={[0, 0, 0]} castShadow>
-        <boxGeometry args={[0.26, 0.28, 0.26]} />
-        <meshStandardMaterial ref={bodyMat} color="#0a0a0a" roughness={0.5} metalness={0.4} flatShading />
-      </mesh>
-      {/* Torso */}
-      <mesh position={[0, -0.46, 0]} castShadow>
-        <boxGeometry args={[0.5, 0.55, 0.3]} />
-        <meshStandardMaterial color="#0a0a0a" roughness={0.5} metalness={0.4} flatShading />
-      </mesh>
-      {/* Hips */}
-      <mesh position={[0, -0.82, 0]} castShadow>
-        <boxGeometry args={[0.42, 0.22, 0.28]} />
-        <meshStandardMaterial color="#0a0a0a" roughness={0.5} metalness={0.4} flatShading />
-      </mesh>
-      {/* Legs */}
-      <mesh position={[-0.13, -1.2, 0]} castShadow>
-        <boxGeometry args={[0.17, 0.75, 0.18]} />
-        <meshStandardMaterial color="#080808" roughness={0.6} flatShading />
-      </mesh>
-      <mesh position={[0.13, -1.2, 0]} castShadow>
-        <boxGeometry args={[0.17, 0.75, 0.18]} />
-        <meshStandardMaterial color="#080808" roughness={0.6} flatShading />
-      </mesh>
-      {/* Off-hand arm, resting on the foregrip */}
-      <mesh position={[-0.28, -0.55, -0.12]} rotation={[0.35, 0, 0]} castShadow>
-        <boxGeometry args={[0.14, 0.5, 0.14]} />
-        <meshStandardMaterial color="#080808" roughness={0.6} flatShading />
-      </mesh>
-
-      {/* Gun arm, tilts with aim pitch. Both weapon models are always mounted and
-          toggled by visibility so switching class never remounts/re-registers refs. */}
-      <group ref={gunPivot} position={[0.3, -0.35, 0]}>
-        <mesh position={[0, -0.05, -0.15]} rotation={[0.5, 0, 0]} castShadow>
-          <boxGeometry args={[0.14, 0.45, 0.14]} />
+    <>
+      {/* Character rig — moved/rotated as one unit each frame to the remote's renderPos/renderYaw. */}
+      <group ref={(g) => { group.current = g; tryRegister() }} visible={false}>
+        {/* Head */}
+        <mesh position={[0, 0, 0]} castShadow>
+          <boxGeometry args={[0.26, 0.28, 0.26]} />
+          <meshStandardMaterial ref={bodyMat} color="#0a0a0a" roughness={0.5} metalness={0.4} flatShading />
+        </mesh>
+        {/* Torso */}
+        <mesh position={[0, -0.46, 0]} castShadow>
+          <boxGeometry args={[0.5, 0.55, 0.3]} />
+          <meshStandardMaterial color="#0a0a0a" roughness={0.5} metalness={0.4} flatShading />
+        </mesh>
+        {/* Hips */}
+        <mesh position={[0, -0.82, 0]} castShadow>
+          <boxGeometry args={[0.42, 0.22, 0.28]} />
+          <meshStandardMaterial color="#0a0a0a" roughness={0.5} metalness={0.4} flatShading />
+        </mesh>
+        {/* Legs */}
+        <mesh position={[-0.13, -1.2, 0]} castShadow>
+          <boxGeometry args={[0.17, 0.75, 0.18]} />
+          <meshStandardMaterial color="#080808" roughness={0.6} flatShading />
+        </mesh>
+        <mesh position={[0.13, -1.2, 0]} castShadow>
+          <boxGeometry args={[0.17, 0.75, 0.18]} />
+          <meshStandardMaterial color="#080808" roughness={0.6} flatShading />
+        </mesh>
+        {/* Off-hand arm, resting on the foregrip */}
+        <mesh position={[-0.28, -0.55, -0.12]} rotation={[0.35, 0, 0]} castShadow>
+          <boxGeometry args={[0.14, 0.5, 0.14]} />
           <meshStandardMaterial color="#080808" roughness={0.6} flatShading />
         </mesh>
 
-        <group ref={beamGunGroup} position={[0, -0.1, -0.6]}>
-          <BeamWeaponModel glowRef={beamGlowMat} accentColor={CLASSES.A.accentColor} />
+        {/* Gun arm, tilts with aim pitch. Both weapon models are always mounted and
+            toggled by visibility so switching class never remounts/re-registers refs. */}
+        <group ref={gunPivot} position={[0.3, -0.35, 0]}>
+          <mesh position={[0, -0.05, -0.15]} rotation={[0.5, 0, 0]} castShadow>
+            <boxGeometry args={[0.14, 0.45, 0.14]} />
+            <meshStandardMaterial color="#080808" roughness={0.6} flatShading />
+          </mesh>
+
+          <group ref={beamGunGroup} position={[0, -0.1, -0.6]}>
+            <BeamWeaponModel glowRef={beamGlowMat} accentColor={CLASSES.A.accentColor} />
+          </group>
+          <group ref={burstGunGroup} position={[0, -0.1, -0.6]}>
+            <BurstWeaponModel glowRef={burstGlowMat} accentColor={CLASSES.B.accentColor} />
+          </group>
         </group>
-        <group ref={burstGunGroup} position={[0, -0.1, -0.6]}>
-          <BurstWeaponModel glowRef={burstGlowMat} accentColor={CLASSES.B.accentColor} />
-        </group>
+
+        {name && (
+          <Billboard position={[0, 0.32, 0]}>
+            <Text
+              fontSize={0.22}
+              color="#ffffff"
+              anchorX="center"
+              anchorY="bottom"
+              outlineWidth={0.01}
+              outlineColor="#000000"
+            >
+              {name}
+            </Text>
+          </Billboard>
+        )}
       </group>
 
-      {/* Beam / burst tracer, shared since a slot is only ever one class at a time */}
-      <mesh ref={beam} visible={false}>
+      {/* World-space effects: positioned/oriented directly each frame, not parented to the rig. */}
+      <mesh ref={(m) => { beam.current = m; tryRegister() }} visible={false}>
         <cylinderGeometry args={[0.03, 0.015, 1, 8, 1, true]} />
         <meshBasicMaterial
           ref={beamMat}
@@ -141,22 +179,29 @@ function RemoteSlot({
           depthWrite={false}
         />
       </mesh>
-
-      {name && (
-        <Billboard position={[0, 0.32, 0]}>
-          <Text
-            fontSize={0.22}
-            color="#ffffff"
-            anchorX="center"
-            anchorY="bottom"
-            outlineWidth={0.01}
-            outlineColor="#000000"
-          >
-            {name}
-          </Text>
-        </Billboard>
-      )}
-    </group>
+      <mesh ref={(m) => { ringFrom.current = m; tryRegister() }} visible={false} rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[0.6, 0.04, 8, 32]} />
+        <meshBasicMaterial
+          ref={ringFromMat}
+          color={CLASSES.B.accentColor}
+          transparent
+          toneMapped={false}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+        />
+      </mesh>
+      <mesh ref={(m) => { ringTo.current = m; tryRegister() }} visible={false} rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[0.6, 0.04, 8, 32]} />
+        <meshBasicMaterial
+          ref={ringToMat}
+          color={CLASSES.B.accentColor}
+          transparent
+          toneMapped={false}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+        />
+      </mesh>
+    </>
   )
 }
 
@@ -189,6 +234,9 @@ export function RemotePlayers() {
       const p = id ? remotePlayers.get(id) : undefined
       if (!p) {
         refs.group.visible = false
+        refs.beam.visible = false
+        refs.ringFrom.visible = false
+        refs.ringTo.visible = false
         continue
       }
 
@@ -197,6 +245,7 @@ export function RemotePlayers() {
       p.renderPitch = THREE.MathUtils.lerp(p.renderPitch, p.targetPitch, 1 - Math.pow(0.001, dt))
       if (p.hitFlash > 0) p.hitFlash = Math.max(0, p.hitFlash - dt * 4)
       if (p.burstFlash > 0) p.burstFlash = Math.max(0, p.burstFlash - dt * 6)
+      if (p.blinkFlash > 0) p.blinkFlash = Math.max(0, p.blinkFlash - dt)
 
       refs.group.visible = p.alive
       refs.group.position.copy(p.renderPos)
@@ -217,7 +266,7 @@ export function RemotePlayers() {
       activeGlowMat.emissiveIntensity = glowIntensity
 
       // Beam (continuous, Class A) or tracer flash (Class B) — mutually exclusive per slot.
-      const showBeam = p.firing || p.burstFlash > 0
+      const showBeam = p.alive && (p.firing || p.burstFlash > 0)
       refs.beam.visible = showBeam
       if (showBeam) {
         refs.gunPivot.getWorldPosition(_tipWorld)
@@ -230,8 +279,26 @@ export function RemotePlayers() {
         _mid.addVectors(_tipWorld, _end).multiplyScalar(0.5)
         refs.beam.position.copy(_mid)
         refs.beam.scale.set(1, BEAM_RANGE, 1)
-        refs.beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), _dir)
+        refs.beam.quaternion.setFromUnitVectors(_up, _dir)
         refs.beamMat.opacity = p.burstFlash > 0 ? Math.min(1, p.burstFlash * 6) * 0.8 : 0.55
+      }
+
+      // Blink phase-rings at the old and new position — reads as a teleport, not a glitch.
+      if (p.blinkFlash > 0) {
+        const t = 1 - p.blinkFlash / BLINK_RING_LIFE
+        const scale = THREE.MathUtils.lerp(0.3, 2, t)
+        const opacity = 1 - t
+        refs.ringFrom.visible = true
+        refs.ringFrom.position.copy(p.blinkFrom)
+        refs.ringFrom.scale.setScalar(scale)
+        refs.ringFromMat.opacity = opacity
+        refs.ringTo.visible = true
+        refs.ringTo.position.copy(p.renderPos)
+        refs.ringTo.scale.setScalar(scale)
+        refs.ringToMat.opacity = opacity
+      } else {
+        refs.ringFrom.visible = false
+        refs.ringTo.visible = false
       }
     }
   })

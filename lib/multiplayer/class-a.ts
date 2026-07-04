@@ -5,6 +5,7 @@ import * as THREE from 'three'
 import { laserAudio } from '@/lib/laser/audio'
 import { laserState } from '@/lib/laser/store'
 import { PLAYER_POS } from '@/lib/laser/world'
+import { DashSlide } from '@/lib/laser/dash-slide'
 import { CLASS_A } from './classes'
 import { damagePlayerAt } from './pvp-hit'
 import { broadcastHit } from './net-sync'
@@ -23,6 +24,7 @@ export function useClassA(deps: ClassDeps): ClassRuntime {
   const beamTarget = useRef<string | null>(null)
   const beamAccum = useRef(0)
   const beamSendTimer = useRef(0)
+  const dashSlide = useRef(new DashSlide())
 
   const flushBeam = useCallback(() => {
     if (beamTarget.current && beamAccum.current > 0) {
@@ -57,9 +59,18 @@ export function useClassA(deps: ClassDeps): ClassRuntime {
     if (_move.lengthSq() === 0) {
       _move.set(-Math.sin(deps.movement.yaw.current), 0, -Math.cos(deps.movement.yaw.current))
     }
-    _move.normalize().multiplyScalar(CLASS_A.dashDistance)
-    PLAYER_POS.add(_move)
-    deps.clampToArena()
+    _move.normalize()
+
+    laserState.abilityFrom = { x: PLAYER_POS.x, y: PLAYER_POS.y, z: PLAYER_POS.z }
+    laserState.abilityTo = {
+      x: PLAYER_POS.x + _move.x * CLASS_A.dashDistance,
+      y: PLAYER_POS.y,
+      z: PLAYER_POS.z + _move.z * CLASS_A.dashDistance,
+    }
+    laserState.abilityKind = 'dash'
+    laserState.abilityAt = performance.now()
+
+    dashSlide.current.start(_move, CLASS_A.dashDistance)
     abilityCooldown.current = CLASS_A.dashCooldown
     deps.setAbilityCooldown(CLASS_A.dashCooldown)
     laserAudio.blip(35)
@@ -70,6 +81,10 @@ export function useClassA(deps: ClassDeps): ClassRuntime {
       if (abilityCooldown.current > 0) {
         abilityCooldown.current = Math.max(0, abilityCooldown.current - dt)
         deps.setAbilityCooldown(abilityCooldown.current)
+      }
+      if (dashSlide.current.active) {
+        dashSlide.current.advance(dt, PLAYER_POS)
+        deps.clampToArena()
       }
 
       deps.camera.getWorldDirection(_forward)

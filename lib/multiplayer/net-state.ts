@@ -32,6 +32,10 @@ export interface RemotePlayerState {
   burstFlash: number
   /** Direction of the most recent burst shot, for the tracer visual */
   lastShotDir: THREE.Vector3
+  /** >0 while this player's blink phase-ring flash should show, decays over time */
+  blinkFlash: number
+  /** Position this player blinked from, so the ring shows at both ends */
+  blinkFrom: THREE.Vector3
 }
 
 /** Keyed by playerId. Plain mutable map, not React/Zustand state — read every frame. */
@@ -66,6 +70,8 @@ export function getOrCreateRemote(
       firing: false,
       burstFlash: 0,
       lastShotDir: new THREE.Vector3(0, 0, -1),
+      blinkFlash: 0,
+      blinkFrom: new THREE.Vector3(0, 1.6, 0),
     }
     remotePlayers.set(playerId, p)
   }

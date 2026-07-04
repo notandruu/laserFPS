@@ -107,4 +107,10 @@ export const laserState = {
   aimPitch: 0,
   /** Short-lived visual flash for single-shot weapons */
   pulseFlash: 0,
+  /** Set whenever a dash/blink fires, so AbilityFx can detect and play a one-shot effect */
+  abilityKind: null as 'dash' | 'blink' | null,
+  /** Timestamp (performance.now()) of the last ability trigger, for change-detection */
+  abilityAt: 0,
+  abilityFrom: { x: 0, y: 1.6, z: 0 },
+  abilityTo: { x: 0, y: 1.6, z: 0 },
 }

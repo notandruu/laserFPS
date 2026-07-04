@@ -13,6 +13,7 @@ import { laserAudio } from '@/lib/laser/audio'
 import { enemyField } from '@/lib/laser/enemies'
 import { ARENA_RADIUS, PLAYER_HEIGHT, PLAYER_POS } from '@/lib/laser/world'
 import { usePlayerMovement } from '@/lib/laser/movement'
+import { DashSlide } from '@/lib/laser/dash-slide'
 import { laserState, useGameStore, type WeaponId } from '@/lib/laser/store'
 import {
   BEAM_DPS,
@@ -23,6 +24,7 @@ import {
   SPRINT_SPEED,
   WALK_SPEED,
 } from '@/lib/laser/weapon-constants'
+import { AbilityFx } from './ability-fx'
 import { Enemies } from './enemies'
 import { HandLaser } from './hand-laser'
 import { Sparks } from './sparks'
@@ -70,6 +72,7 @@ function Controller() {
   const dashCooldown = useRef(0)
   const lastPulseDisplay = useRef(0)
   const lastDashDisplay = useRef(0)
+  const dashSlide = useRef(new DashSlide())
 
   const stopFiring = useCallback(() => {
     if (!laserState.firing) return
@@ -130,14 +133,22 @@ function Controller() {
     if (_move.lengthSq() === 0) {
       _move.set(-Math.sin(movement.yaw.current), 0, -Math.cos(movement.yaw.current))
     }
+    _move.normalize()
 
-    _move.normalize().multiplyScalar(DASH_DISTANCE)
-    PLAYER_POS.add(_move)
-    clampPlayerToArena()
+    laserState.abilityFrom = { x: PLAYER_POS.x, y: PLAYER_POS.y, z: PLAYER_POS.z }
+    laserState.abilityTo = {
+      x: PLAYER_POS.x + _move.x * DASH_DISTANCE,
+      y: PLAYER_POS.y,
+      z: PLAYER_POS.z + _move.z * DASH_DISTANCE,
+    }
+    laserState.abilityKind = 'dash'
+    laserState.abilityAt = performance.now()
+
+    dashSlide.current.start(_move, DASH_DISTANCE)
     dashCooldown.current = DASH_COOLDOWN
     publishDashCooldown(DASH_COOLDOWN)
     laserAudio.blip(35)
-  }, [clampPlayerToArena, movement, publishDashCooldown])
+  }, [movement, publishDashCooldown])
 
   const firePulse = useCallback(() => {
     if (modeRef.current !== 'playing') return
@@ -238,6 +249,10 @@ function Controller() {
     if (dashCooldown.current > 0) {
       dashCooldown.current = Math.max(0, dashCooldown.current - dt)
       publishDashCooldown(dashCooldown.current)
+    }
+    if (dashSlide.current.active) {
+      dashSlide.current.advance(dt, PLAYER_POS)
+      clampPlayerToArena()
     }
 
     _move.set(0, 0, 0)
@@ -456,6 +471,7 @@ export function LaserScene() {
       <Arena />
       <HandLaser kind={weapon === 'beam' ? 'beam' : 'burst'} />
       <Sparks />
+      <AbilityFx />
 
       <EffectComposer>
         <Bloom

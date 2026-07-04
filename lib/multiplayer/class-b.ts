@@ -64,9 +64,15 @@ export function useClassB(deps: ClassDeps): ClassRuntime {
     if (_move.lengthSq() === 0) {
       _move.set(-Math.sin(deps.movement.yaw.current), 0, -Math.cos(deps.movement.yaw.current))
     }
-    _move.normalize().multiplyScalar(CLASS_B.blinkDistance)
+    _move.normalize()
+
+    laserState.abilityFrom = { x: PLAYER_POS.x, y: PLAYER_POS.y, z: PLAYER_POS.z }
+    _move.multiplyScalar(CLASS_B.blinkDistance)
     PLAYER_POS.add(_move)
     deps.clampToArena()
+    laserState.abilityTo = { x: PLAYER_POS.x, y: PLAYER_POS.y, z: PLAYER_POS.z }
+    laserState.abilityKind = 'blink'
+    laserState.abilityAt = performance.now()
 
     const invulnUntil = performance.now() + CLASS_B.blinkInvulnSeconds * 1000
     myNetState.invulnUntil = invulnUntil

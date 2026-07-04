@@ -15,6 +15,7 @@ import { Arena } from '@/components/laser/scene'
 import { HandLaser } from '@/components/laser/hand-laser'
 import { CLASSES } from '@/lib/multiplayer/classes'
 import { Sparks } from '@/components/laser/sparks'
+import { AbilityFx } from '@/components/laser/ability-fx'
 import { laserState } from '@/lib/laser/store'
 import { ARENA_RADIUS, PLAYER_HEIGHT, PLAYER_POS } from '@/lib/laser/world'
 import { useClassA } from '@/lib/multiplayer/class-a'
@@ -177,6 +178,7 @@ export function MultiplayerScene() {
         accentColor={classConfig.accentColor}
       />
       <Sparks />
+      <AbilityFx />
 
       <EffectComposer>
         <Bloom intensity={0.9} luminanceThreshold={0.75} luminanceSmoothing={0.2} mipmapBlur />

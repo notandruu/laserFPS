@@ -106,9 +106,11 @@ function handleMessage(msg: NetMessage) {
     const m = msg as BlinkMsg
     const p = remotePlayers.get(m.playerId)
     if (p) {
+      p.blinkFrom.copy(p.renderPos)
       p.targetPos.set(m.pos[0], m.pos[1], m.pos[2])
       p.renderPos.copy(p.targetPos)
       p.invulnUntil = m.invulnUntil
+      p.blinkFlash = 0.2
     }
     return
   }
