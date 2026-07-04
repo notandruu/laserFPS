@@ -27,7 +27,7 @@ function Key({ children }: { children: React.ReactNode }) {
   )
 }
 
-export function Hud() {
+export function Hud({ onMultiplayer }: { onMultiplayer?: () => void } = {}) {
   const mode = useGameStore((s) => s.mode)
   const startGame = useGameStore((s) => s.startGame)
   const setMode = useGameStore((s) => s.setMode)
@@ -125,13 +125,24 @@ export function Hud() {
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={start}
-            className="w-64 border border-white bg-white px-6 py-3 text-sm font-bold tracking-[0.3em] text-black transition-colors hover:bg-black hover:text-white"
-          >
-            START
-          </button>
+          <div className="flex flex-col items-center gap-3">
+            <button
+              type="button"
+              onClick={start}
+              className="w-64 border border-white bg-white px-6 py-3 text-sm font-bold tracking-[0.3em] text-black transition-colors hover:bg-black hover:text-white"
+            >
+              START
+            </button>
+            {onMultiplayer && (
+              <button
+                type="button"
+                onClick={onMultiplayer}
+                className="w-64 border border-white/40 px-6 py-3 text-sm font-bold tracking-[0.3em] text-white transition-colors hover:border-white hover:bg-white hover:text-black"
+              >
+                MULTIPLAYER
+              </button>
+            )}
+          </div>
 
           {highScore > 0 && (
             <div className="text-[11px] tracking-[0.3em] text-white/50">

@@ -4,6 +4,7 @@ import { useFrame, useThree } from '@react-three/fiber'
 import { useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { laserState } from '@/lib/laser/store'
+import { BeamWeaponModel, BurstWeaponModel } from './weapon-models'
 
 const _targetQuat = new THREE.Quaternion()
 const _lookMatrix = new THREE.Matrix4()
@@ -54,66 +55,6 @@ function Finger({
   )
 }
 
-/** Sleek matte-black laser device */
-function LaserDevice({ tipRef }: { tipRef: React.RefObject<THREE.Mesh | null> }) {
-  const ringRef = useRef<THREE.MeshStandardMaterial>(null)
-
-  useFrame((state) => {
-    if (!ringRef.current) return
-    const active = (laserState.firing && laserState.hasHit) || laserState.pulseFlash > 0
-    const pulse = active
-      ? 2.4 + Math.sin(state.clock.elapsedTime * 30) * 0.6
-      : 0.5 + Math.sin(state.clock.elapsedTime * 2) * 0.2
-    ringRef.current.emissiveIntensity = pulse
-  })
-
-  return (
-    <group>
-      {/* Main body */}
-      <mesh rotation={[Math.PI / 2, 0, 0]}>
-        <cylinderGeometry args={[0.034, 0.04, 0.36, 24]} />
-        <meshStandardMaterial color="#0c0c0c" roughness={0.3} metalness={0.8} />
-      </mesh>
-      {/* Grip knurling band */}
-      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0, 0.08]}>
-        <cylinderGeometry args={[0.042, 0.042, 0.1, 24]} />
-        <meshStandardMaterial color="#1a1a1a" roughness={0.9} metalness={0.2} />
-      </mesh>
-      {/* White accent ring near the tip */}
-      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0, -0.13]}>
-        <cylinderGeometry args={[0.037, 0.037, 0.018, 24]} />
-        <meshStandardMaterial
-          ref={ringRef}
-          color="#ffffff"
-          emissive="#ffffff"
-          emissiveIntensity={0.5}
-          toneMapped={false}
-        />
-      </mesh>
-      {/* Tapered nose */}
-      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0, -0.2]}>
-        <cylinderGeometry args={[0.022, 0.034, 0.08, 24]} />
-        <meshStandardMaterial color="#080808" roughness={0.25} metalness={0.9} />
-      </mesh>
-      {/* Emitter tip, beam origin */}
-      <mesh ref={tipRef} rotation={[Math.PI / 2, 0, 0]} position={[0, 0, -0.245]}>
-        <cylinderGeometry args={[0.012, 0.018, 0.02, 16]} />
-        <meshStandardMaterial
-          color="#ffffff"
-          emissive="#ffffff"
-          emissiveIntensity={1.2}
-          toneMapped={false}
-        />
-      </mesh>
-      {/* Tail cap */}
-      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0, 0.19]}>
-        <sphereGeometry args={[0.038, 18, 18]} />
-        <meshStandardMaterial color="#101010" roughness={0.4} metalness={0.7} />
-      </mesh>
-    </group>
-  )
-}
-
 /** Stylized gloved hand gripping the device */
 function Hand() {
   return (
@@ -144,7 +85,13 @@ function Hand() {
   )
 }
 
-export function HandLaser() {
+export function HandLaser({
+  kind = 'beam',
+  accentColor,
+}: {
+  kind?: 'beam' | 'burst'
+  accentColor?: string
+} = {}) {
   const { camera } = useThree()
   const rigRef = useRef<THREE.Group>(null)
   const aimRef = useRef<THREE.Group>(null)
@@ -241,7 +188,11 @@ export function HandLaser() {
     <>
       <group ref={rigRef}>
         <group ref={aimRef}>
-          <LaserDevice tipRef={tipRef} />
+          {kind === 'beam' ? (
+            <BeamWeaponModel tipRef={tipRef} accentColor={accentColor} />
+          ) : (
+            <BurstWeaponModel tipRef={tipRef} accentColor={accentColor} />
+          )}
           <Hand />
         </group>
       </group>

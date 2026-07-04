@@ -15,11 +15,11 @@ const LaserScene = dynamic(
   }
 )
 
-export function LaserGame() {
+export function LaserGame({ onMultiplayer }: { onMultiplayer?: () => void } = {}) {
   return (
     <div className="relative h-dvh w-full cursor-none overflow-hidden bg-black">
       <LaserScene />
-      <Hud />
+      <Hud onMultiplayer={onMultiplayer} />
     </div>
   )
 }
